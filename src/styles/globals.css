@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* --- Global readability fix --- */
+body {
+  @apply bg-white text-gray-900 antialiased;
+}
+
+/* Inputs, textareas, selects: force visible text on light backgrounds */
+input,
+textarea,
+select {
+  @apply text-gray-900 bg-white placeholder-gray-400;
+}
+
+/* Buttons: readable colors for all themes */
+button {
+  @apply font-medium;
+}
+
+/* Fix for textarea selection (mobile readability) */
+textarea::placeholder {
+  color: #999;
+}

@@ -1,0 +1,97 @@
+"use client";
+import { useState } from "react";
+
+type Props = {
+  step1Text: string;
+  onQuestions: (questionsPlain: string) => void; // append to Notes
+};
+
+function parseStep1(step1Text: string) {
+  // Topic
+  let topic = "General";
+  const m1 = step1Text.match(/relate to\s+([A-Za-z ]+?)[,.\n]/i);
+  const m2 = step1Text.match(/Topic:\s*([^\n]+)/i);
+  if (m1?.[1]) topic = m1[1].trim();
+  else if (m2?.[1]) topic = m2[1].trim();
+
+  // Keywords
+  let keywords: string[] = [];
+  const kw = step1Text.match(/Keywords:\s*([^\n]+)/i)?.[1] ?? "";
+  if (kw) {
+    keywords = kw
+      .split(",")
+      .map(s => s.trim())
+      .filter(Boolean);
+  }
+  return { topic, keywords };
+}
+
+export default function Step2({ step1Text, onQuestions }: Props) {
+  const [loading, setLoading] = useState(false);
+  const [questions, setQuestions] = useState<string>("");
+
+  async function handleGenerate() {
+    setLoading(true);
+    setQuestions("");
+    try {
+      const { topic, keywords } = parseStep1(step1Text);
+
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "draft",
+          topic,
+          keywords,
+          count: 8,
+        }),
+      });
+
+      const data = await res.json();
+      if (!data?.ok) throw new Error("API returned an error.");
+
+      const msg = data.message as {
+        profile: string[];
+        likert: string[];
+        open: string[];
+      };
+
+      const merged = [...(msg.profile || []), ...(msg.likert || []), ...(msg.open || [])];
+      const numbered = merged.map((q, i) => `${i + 1}. ${q}`).join("\n");
+
+      setQuestions(numbered);
+      if (numbered) onQuestions(`Step 2 — Draft Questions:\n${numbered}`);
+    } catch (e: any) {
+      setQuestions(`(Error) ${e?.message ?? "Request failed."}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="p-6 bg-neutral-900/40 rounded-2xl border border-neutral-800">
+      <h2 className="text-2xl font-bold mb-3">Step 2 — Questionnaire Draft</h2>
+      <p className="text-neutral-300 mb-4">
+        Based on your Step 1 summary, we’ll build concise, answerable questions next.
+      </p>
+
+      <div className="flex gap-3">
+        <button
+          onClick={handleGenerate}
+          disabled={loading}
+          className="px-4 py-2 rounded-md bg-blue-600 disabled:opacity-60"
+        >
+          {loading ? "Generating..." : "Generate 6–8 Questions"}
+        </button>
+      </div>
+
+      {questions && (
+        <pre className="mt-5 whitespace-pre-wrap text-sm bg-neutral-900 border border-neutral-800 rounded-lg p-4">
+{questions}
+        </pre>
+      )}
+
+      <p className="text-xs text-neutral-400 mt-2">Questions are added to Notes automatically.</p>
+    </div>
+  );
+}
