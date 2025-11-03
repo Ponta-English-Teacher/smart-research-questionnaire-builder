@@ -364,6 +364,11 @@ export default function Page() {
           Press <b>Enter</b> to send — <b>Shift+Enter</b> for a new line.
         </div>
       </section>
+
+      <footer className="text-center text-xs text-gray-500 mt-10 border-t pt-4">
+        Smart Research Questionnaire Builder © 2025  
+        Developed by <b>Professor Hitoshi Eguchi</b> — Hokusei Gakuen University, Sapporo, Japan
+      </footer>
     </main>
   );
 }
