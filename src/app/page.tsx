@@ -44,13 +44,18 @@ export default function Page() {
     { role: "user" | "assistant"; content: string }[]
   >([]);
 
-  // ---- Chat B (general)
-  const [chatBInput, setChatBInput] = useState("");
-  const [chatBLoading, setChatBLoading] = useState(false);
-  const [chatBErr, setChatBErr] = useState("");
-  const [chatBHistory, setChatBHistory] = useState<
-    { role: "user" | "assistant"; content: string }[]
-  >([]);
+  // Last assistant message from Chat A (empty string if none yet)
+  const chatALastAnswer = useMemo(
+    () =>
+      [...chatAHistory].reverse().find((m) => m.role === "assistant")?.content ?? "",
+    [chatAHistory]
+  );
+
+  // ---- Script Generator
+  const [scriptOutput, setScriptOutput] = useState("");
+  const [scriptLoading, setScriptLoading] = useState(false);
+  const [scriptErr, setScriptErr] = useState("");
+  const [scriptCopied, setScriptCopied] = useState(false);
 
   // --- helpers
   function freshIds(texts: string[]): Q[] {
@@ -179,26 +184,48 @@ export default function Page() {
     }
   }
 
-  // ---- Chat B (independent)
-  async function handleChatBSend() {
-    if (!chatBInput.trim()) return;
-    const userMsg = { role: "user" as const, content: chatBInput.trim() };
-    setChatBHistory((h) => [...h, userMsg]);
-    setChatBInput("");
-    setChatBLoading(true);
-    setChatBErr("");
-    try {
-      const txt = await postChat({
-        mode: "chat",
-        message: userMsg.content,
-        history: chatBHistory,
-      });
-      setChatBHistory((h) => [...h, { role: "assistant", content: txt }]);
-    } catch (e: any) {
-      setChatBErr(e.message);
-    } finally {
-      setChatBLoading(false);
+  // ---- Script Generator
+  async function handleGenerateScript() {
+    const selected = questions.filter((q) => q.selected).map((q) => q.text);
+    const hasSource = chatALastAnswer.trim() !== "" || selected.length > 0;
+    if (!hasSource) {
+      setScriptErr(
+        "No questionnaire available. Generate questions in Step 2, or use Chat A to build the final questionnaire first."
+      );
+      return;
     }
+    setScriptLoading(true);
+    setScriptErr("");
+    setScriptOutput("");
+    setScriptCopied(false);
+    try {
+      const res = await fetch("/api/generate-script", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: topic || "Research Questionnaire",
+          // Pass Chat A's final answer as primary source; API falls back to questions[] if absent
+          chatAFinalAnswer: chatALastAnswer.trim() || undefined,
+          questions: selected,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || "API error");
+      }
+      setScriptOutput(String(data.code || ""));
+    } catch (e: any) {
+      setScriptErr(e.message);
+    } finally {
+      setScriptLoading(false);
+    }
+  }
+
+  async function handleCopyScript() {
+    if (!scriptOutput) return;
+    await navigator.clipboard.writeText(scriptOutput);
+    setScriptCopied(true);
+    setTimeout(() => setScriptCopied(false), 2000);
   }
 
   // ---- UI
@@ -206,8 +233,8 @@ export default function Page() {
     <main className="mx-auto max-w-4xl p-6 space-y-10">
       <h1 className="text-2xl font-bold">Smart Research Questionnaire Builder</h1>
       <p className="text-sm text-gray-600">
-        A simple, AI-assisted flow for Topics → Keywords → Questionnaire. Two chat areas:
-        <b> Chat A</b> (discuss & regenerate) and <b>Chat B</b> (general).
+        A simple, AI-assisted flow for Topics → Keywords → Questionnaire.
+        Use <b>Chat A</b> to discuss and refine, then generate a Google Form script below.
       </p>
 
       {/* ---- Step 1 */}
@@ -331,38 +358,59 @@ export default function Page() {
         </div>
       </section>
 
-      {/* ---- Chat B */}
-      <section className="space-y-3 rounded-lg border p-3">
-        <div className="text-sm font-semibold">Chat B — general chatbot (independent)</div>
-        <div className="space-y-2 max-h-64 overflow-auto bg-white rounded-md border p-2">
-          {chatBHistory.length === 0 && (
-            <div className="text-xs text-gray-500">
-              Ask anything (theme ideas, keyword brainstorming, coding help, etc.).
-            </div>
-          )}
-          {chatBHistory.map((m, i) => (
-            <div key={i} className={m.role === "user" ? "text-sm" : "text-sm bg-gray-50 p-2 rounded"}>
-              <b>{m.role === "user" ? "You" : "Assistant"}:</b> {m.content}
-            </div>
-          ))}
-          {chatBErr && <div className="text-xs text-red-600">Error: {chatBErr}</div>}
+      {/* ---- Google Forms Apps Script Generator */}
+      <section className="space-y-3 rounded-lg border border-blue-200 bg-blue-50 p-4">
+        <div className="text-sm font-semibold text-blue-900">
+          Google Forms Apps Script Generator
         </div>
+        <p className="text-xs text-blue-700">
+          {chatALastAnswer.trim()
+            ? "Source: Chat A additions + Step 2 questions (merged — Chat A sections come first)."
+            : "Source: selected Step 2 questions (no Chat A answer yet)."}
+          {" "}Paste the code directly into Apps Script — no editing needed.
+        </p>
 
-        <input
-          className="w-full rounded-md border p-2"
-          placeholder="Ask me anything…"
-          value={chatBInput}
-          onChange={(e) => setChatBInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              if (!chatBLoading) handleChatBSend();
-            }
-          }}
-        />
-        <div className="text-xs text-gray-500">
-          Press <b>Enter</b> to send — <b>Shift+Enter</b> for a new line.
-        </div>
+        <button
+          className="w-full rounded-md px-4 py-2.5 text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          onClick={handleGenerateScript}
+          disabled={scriptLoading || (!chatALastAnswer.trim() && chosenCount === 0)}
+        >
+          {scriptLoading
+            ? "Generating script…"
+            : chatALastAnswer.trim()
+            ? "Generate Google Form Script (Chat A + Step 2 merged)"
+            : `Generate Google Form Script from Selected Questions (${chosenCount})`}
+        </button>
+
+        {!chatALastAnswer.trim() && chosenCount === 0 && (
+          <p className="text-xs text-amber-700">
+            Generate questions in Step 2, or use Chat A to finalize the questionnaire first.
+          </p>
+        )}
+
+        {scriptErr && (
+          <p className="text-xs text-red-600">Error: {scriptErr}</p>
+        )}
+
+        {scriptOutput && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-blue-700">
+                Copy and paste into{" "}
+                <strong>Google Apps Script</strong> (script.google.com).
+              </span>
+              <button
+                className="rounded-md px-4 py-1.5 text-sm font-medium border border-blue-300 bg-white text-blue-700 hover:bg-blue-50 transition-colors"
+                onClick={handleCopyScript}
+              >
+                {scriptCopied ? "✓ Copied!" : "Copy Code"}
+              </button>
+            </div>
+            <pre className="overflow-auto rounded-md bg-gray-950 text-green-300 text-xs p-4 font-mono whitespace-pre leading-relaxed">
+              {scriptOutput}
+            </pre>
+          </div>
+        )}
       </section>
 
       <footer className="text-center text-xs text-gray-500 mt-10 border-t pt-4">
